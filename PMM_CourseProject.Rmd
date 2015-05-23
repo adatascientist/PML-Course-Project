@@ -1,0 +1,146 @@
+---
+output: html_document
+---
+## Classifying Exercise Performance Quality from Weightlifting Exercise Data
+
+### Overview  
+
+This analysis is based on data collected from the study, "Qualitative Activity Recognition of Weight Lifting Exercises," by Vellaso, Bulling, Gellersem, Ugulino, adn Fuks.  During this study, data was collected from sensors while subjects performed weightlifting exercises.  Instead of trying to determine which exercises were performed, the team proposed that a model could be created to assess and categorize the quality of the exercise performance.  In this analysis, a predictive model will be created from the same data and an attempt will be made to accurately categorize or match the classes assigned to the data during the study.
+
+### Data Processing
+
+### Obtain Project Training and Testing Data Sets  
+
+Below the training and testing data sets for this project are downloaded from the sites provided, saved to the working directory, and then read into trainSet and testSet dataframes.     
+
+```{r, cache=TRUE}
+fileURLtrain <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileURLtrain,mode="wb",destfile="./pml-training.csv")
+
+fileURLtest <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileURLtest,mode="wb",destfile="./pml-testing.csv")
+
+trainSet<-read.csv("pml-training.csv")
+testSet<-read.csv("pml-testing.csv")
+```  
+### Basic Summary and Analysis of the Data  
+
+First we will use the str function to get a data summary of the trainSet data frame.  We can see that there are 19662 observations with 160 variables.  We can also see that there is a combination of measured data and calculations based on the measurements.  Also, there are quite a few variables with a high number of NAs and some with "DIV/0!" warnings.   
+```{r}
+str(trainSet)
+```  
+
+If we have a closer look at the NA's in the trainset, we can see that indeed there are many.  We can also see which variables we may want to extract.  It appears that if we remove the variables based on calculations, we should be able to get rid of alot of the NA's.  
+
+```{r}
+sum(is.na(trainSet))
+naCols<-which(colSums(is.na(trainSet))>0)
+names(trainSet[,naCols])
+
+```  
+
+Aside from the calculation variables, the first seven variables are also targeted for extraction.  The assumption is that variables such as X, the user name, time, whether a window was new or not, and the window number are more for administrative purposes rather than for performance measurement.  The extraction of administrative variables creates trainSet1.  After extracting these and the calculation variables (including kurtosis and skewness) and leaving the classe variable in the data set, we can see that we end up with 53 columns, 52 predictors plus the classe variable.  We can also see that the NA's have been successfully removed.  This data frame is trainSet2.      
+```{r}
+trainSet1<-trainSet[,8:160]  ##Remove administrative variables.
+
+##Identify calculation variables.
+calcIndex<-c(grep("^max",names(trainSet1)),grep("^min",names(trainSet1)),
+             grep("^amplitude",names(trainSet1)),grep("^var",names(trainSet1)),
+             grep("^avg",names(trainSet1)),grep("^stddev",names(trainSet1)),
+             grep("^kurtosis",names(trainSet1)),grep("^skewness",names(trainSet1))
+             )
+
+trainSet2<-trainSet1[,-calcIndex]  ##Remove calculation variables.
+
+dim(trainSet2)
+
+sum(is.na(trainSet2))  ##Check if NA's have been removed.
+```  
+
+### Setting Up Cross Validation Data Sets  
+
+As seen earlier, the trainSet has quite a bit of data to work with.  This provides the opportunity to divide up the trainSet in order to allow both model tuning and testing.  Below, the caret createDataPartion method was used to create two training and one testing set of modest size in order to allow the use of more processing-intensive model methods such as random forest.  For the first training set, 5% of the trainSet2 was assigned to training1.  For the next training set, 20% of trainSet2 was assigned to training2.  Finally, a previously unused 5% of trainSet2 was assigned to testing data set.  This set is used for testing purposes since the testSet read from the pml-testing file does not contain the classe variable for accuracy comparisons.  As you can see, this partitioning process results in more manageable data sets for methods such as random forest.    
+
+```{r}
+library(caret)
+cVal1<-createDataPartition(y=trainSet2$classe,p=0.05,list=FALSE)
+training1<-trainSet2[cVal1,]
+
+cVal2<-createDataPartition(y=trainSet2$classe,p=0.2,list=FALSE)
+training2<-trainSet2[cVal2,]
+
+cVal3<-createDataPartition(y=trainSet2$classe,p=0.95,list=FALSE)
+testing<-trainSet2[-cVal3,]
+
+dim(training1);dim(training2);dim(testing)
+
+```   
+
+### Model Selection Process      
+
+Sometimes you learn the hard way.  From review of the various model methods, I had my heart set on using random forest in order to maximize the accuracy.  In my excitement to see how this would look with all 52 predictors and all 19622 observations, I attempted to use the unabridged trainSet2 data set using the "rf" method.  While I never got to see the results from this model, I did give it all the chance that I could afford.  I let it run for three days!
+
+Other methods were also considered.  The "qda" method was very fast and could handle the entire trainSet2 data frame.  However, I was not satisfied with less than 90%  accuracy that was observed.  A limited attempt was made with the "rpart" method using complete cases from the original trainSet data frame.  However, the resulting model did not explain all of the classes required for the test cases.
+
+Not wanting to give up on the random forest method, I re-visited this with much smaller data sets, starting with 5% and ultimately working up to 20% of the trainSet2 data set in my quest for a high level of accuracy.  In an effort to fully leverage the training data, the "cv" train control method was applied 10 times.  Because of the processing time for the random forest method, I made it a point to save the models.  This model, modelFit2, is constructed below.  Its results are shown in the Results section.  
+
+
+```{r, cache=TRUE}
+library(randomForest)
+library(tree)
+
+tc<-trainControl(method="cv",number=10)
+modelFit2<-train(classe~.,method="rf",data=training2,trControl=tc)
+saveRDS(modelFit2,"modelFit2.rds")
+
+```  
+
+
+### Results  
+
+The model built, modelFit1, with 5% of trainSet2 (training1) showed a 93% in-sample accuracy.  ModelFit2 built with 20% of trainSet2 (training2) showed a 97% in-sample accuracy with out of sample error estimate of ~3%.  
+
+Taking the "testing" data set reserved from the trainSet2 data set and resulting predictions, we see that an accuracy of ~97% is observed supporting an out of sample error estmate of 3%.
+
+Using the varImp function suggests that even fewer predictors may be selected based on importance.  This will be left as an exercise for another day.
+
+
+```{r,cache=TRUE}
+plot(modelFit2$finalModel)
+modelFit2
+modelFit2$finalModel
+
+predTest<-predict(modelFit2,newdata=testing)
+confusionMatrix(predTest,testing$classe)
+
+varImp(modelFit2)
+
+```
+***Creating Answer File.
+
+The code below was provided from the project assignment for creating an answer set for submission of test case results.  The modelFit2 was used to make the class predictions that were submitted. The results showed that this model predicted the correct class for each of the 20 test cases in the testSet (from pml-testing file) provided. 
+
+```{r}
+pml_write_files = function(x){
+    n=length(x)
+    for(i in 1:n){
+        filename=paste0("problem_id",i,"txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+answers<-predict(modelFit2,newdata=testSet)
+
+pml_write_files(answers)
+
+```  
+
+
+### Conclusion    
+
+The results of this analysis support the idea that measured activity data can be modeled and classified.  In our efforts to reproduce the classification results that were obtained in the original study, we have seen that it is possible to model the data and to predict the performance classification with a high degree of accuracy.  
+
+ 
+
+
+
